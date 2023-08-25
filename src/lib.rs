@@ -17,6 +17,9 @@ pub mod delta_table;
 /// defines a common expression language for use in data skipping predicates
 pub mod expressions;
 
+/// c ffi interface
+pub mod ffi;
+
 /// generic parquet interface
 pub mod parquet_reader;
 
