@@ -52,6 +52,7 @@ pub extern fn next_array(iter: *mut ArrowArrayIterator) -> *const ArrowArrayAndS
             let array_data = struct_array.into_data();
             match arrow::ffi::to_ffi(&array_data) {
                 Ok((array, schema)) => {
+                    println!("returning a thing");
                     Box::into_raw(Box::new(ArrowArrayAndSchema {
                         array, schema
                     }))
@@ -87,9 +88,6 @@ pub extern fn delta_scanner(path: *const c_char) -> *mut ArrowArrayIterator {
         _marker: PhantomData,
     };
     println!("created with {} batches", iter._batches.len());
-
-    // let ret_str = CString::new("returned from rust").unwrap();
-    // ret_str.into_raw()
 
     Box::into_raw(Box::new(iter))
 }
