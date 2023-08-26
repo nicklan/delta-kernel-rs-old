@@ -1,12 +1,12 @@
 #include <stdio.h>
 
-struct RecordBatchIterator;
+struct ArrowArrayIterator;
 
-extern struct RecordBatchIterator* delta_scanner(char*);
-extern next_batch(struct RecordBatchIterator*);
+extern struct ArrowArrayIterator* delta_scanner(const char*);
+extern next_array(struct ArrowArrayIterator*);
 
 int main(void) {
-  struct RecordBatchIterator* ret = delta_scanner("tests/data/table-with-dv-small");
-  next_batch(ret);
+  struct ArrowArrayIterator* ret = delta_scanner("tests/data/table-with-dv-small");
+  next_array(ret);
   return 0;
 }
