@@ -36,17 +36,25 @@ pub struct ArrowArrayIterator {
     _marker: PhantomData<core::marker::PhantomPinned>,
 }
 
+#[derive(Debug)]
+#[repr(C)]
+pub struct ArrowArrayAndSchema {
+    array: FFI_ArrowArray,
+    schema: FFI_ArrowSchema,
+}
+
 #[no_mangle]
-pub extern fn next_array(iter: *mut ArrowArrayIterator) -> *const (FFI_ArrowArray, FFI_ArrowSchema) {
+pub extern fn next_array(iter: *mut ArrowArrayIterator) -> *const ArrowArrayAndSchema {
     let next = unsafe { (*iter)._batches.pop() };
     match next {
         Some(batch) => {
             let struct_array: StructArray = batch.into();
             let array_data = struct_array.into_data();
             match arrow::ffi::to_ffi(&array_data) {
-                Ok(tuple) => {
-                    println!("returning tuple");
-                    Box::into_raw(Box::new(tuple))
+                Ok((array, schema)) => {
+                    Box::into_raw(Box::new(ArrowArrayAndSchema {
+                        array, schema
+                    }))
                 }
                 Err(e) => {
                     println!("Error converting to ffi: {}", e);
