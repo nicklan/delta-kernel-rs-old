@@ -8,7 +8,6 @@
     unused_extern_crates,
     rust_2018_idioms,
     rust_2021_compatibility,
-    missing_debug_implementations
 )]
 
 /// Includes top-level DeltaTable type which can construct Snapshots

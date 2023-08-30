@@ -12,7 +12,7 @@ use self::reader::DeltaReader;
 
 // the Scan type is only concerned with metadata. it produces DataFiles which must then be read
 // TODO move this up/out of scan?
-mod reader;
+pub mod reader;
 // mod deletion_vectors;
 
 // TODO ownership: should this own location/log_segment/schema/expression?

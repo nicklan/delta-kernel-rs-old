@@ -1,4 +1,5 @@
 
+use crate::scan::reader::DeltaReader;
 use crate::{delta_table::DeltaTable, storage::StorageClient};
 use std::path::PathBuf;
 
@@ -29,10 +30,12 @@ impl StorageClient for LocalStorageClient {
 }
 
 // implement an iterator that can be used from c
-#[derive(Debug)]
 #[repr(C)]
 pub struct ArrowArrayIterator {
-    _batches: Vec<RecordBatch>,
+    _file_batches: Vec<RecordBatch>,
+    _cur_data_batch: Option<RecordBatch>,
+    _storage_client: LocalStorageClient,
+    _reader: DeltaReader,
     _marker: PhantomData<core::marker::PhantomPinned>,
 }
 
@@ -45,20 +48,31 @@ pub struct ArrowArrayAndSchema {
 
 #[no_mangle]
 pub extern fn next_array(iter: *mut ArrowArrayIterator) -> *const ArrowArrayAndSchema {
-    let next = unsafe { (*iter)._batches.pop() };
-    match next {
+    let it: &mut ArrowArrayIterator = unsafe { &mut *iter };
+    if it._cur_data_batch.is_none() {
+        it._cur_data_batch = it._file_batches.pop();
+    }
+    match it._cur_data_batch.take() {
         Some(batch) => {
-            let struct_array: StructArray = batch.into();
-            let array_data = struct_array.into_data();
-            match arrow::ffi::to_ffi(&array_data) {
-                Ok((array, schema)) => {
-                    println!("returning a thing");
-                    Box::into_raw(Box::new(ArrowArrayAndSchema {
-                        array, schema
-                    }))
+            let mut reader_iter = it._reader.read_batch(batch, &it._storage_client);
+            match reader_iter.next().unwrap() {
+                Ok(data_batch) => {
+                    let struct_array: StructArray = data_batch.into();
+                    let array_data = struct_array.into_data();
+                    match arrow::ffi::to_ffi(&array_data) {
+                        Ok((array, schema)) => {
+                            Box::into_raw(Box::new(ArrowArrayAndSchema {
+                                array, schema
+                            }))
+                        }
+                        Err(e) => {
+                            println!("Error converting to ffi: {}", e);
+                            std::ptr::null()
+                        }
+                    }
                 }
                 Err(e) => {
-                    println!("Error converting to ffi: {}", e);
+                    println!("Error reading batch: {}", e);
                     std::ptr::null()
                 }
             }
@@ -67,6 +81,21 @@ pub extern fn next_array(iter: *mut ArrowArrayIterator) -> *const ArrowArrayAndS
             std::ptr::null()
         }
     }
+    
+    // match iter._cur_data_batch {
+    //     Some(v) => {}
+    //     None => {
+    //         let next = unsafe { (*iter)._file_batches.pop() };
+    //         match next {
+    //             Some(batch) => {
+
+    //             }
+    //             None => {
+    //                 std::ptr::null()
+    //             }
+    //         }
+    //     }
+    // }
 }
 
 #[no_mangle]
@@ -80,14 +109,15 @@ pub extern fn delta_scanner(path: *const c_char) -> *mut ArrowArrayIterator {
     let snapshot = table.get_latest_snapshot(&storage_client);
     let scan = snapshot.scan().build();
     let files_batches = scan.files(&storage_client);
-
     let batches: Vec<RecordBatch> = files_batches.collect();
 
     let iter = ArrowArrayIterator {
-        _batches: batches,
+        _file_batches: batches,
+        _cur_data_batch: None,
+        _storage_client: storage_client,
+        _reader: scan.create_reader(),
         _marker: PhantomData,
     };
-    println!("created with {} batches", iter._batches.len());
 
     Box::into_raw(Box::new(iter))
 }
