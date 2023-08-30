@@ -2,7 +2,7 @@
 
 #include <glib.h>
 #include <arrow-glib/arrow-glib.h>
-#include "arrow/c/abi.h"
+#include <arrow/c/abi.h>
 
 
 struct ArrowArrayIterator;
@@ -14,6 +14,9 @@ typedef struct ArrowArrayAndSchema {
 
 extern struct ArrowArrayIterator* delta_scanner(const char*);
 extern void* next_array(struct ArrowArrayIterator*);
+
+// print functions taken (and modified) from upstream apache arrow example code, licence:
+// http://www.apache.org/licenses/LICENSE-2.0
 
 static void
 print_array(GArrowArray *array)
