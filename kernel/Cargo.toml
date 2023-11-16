@@ -8,6 +8,9 @@ repository.workspace = true
 readme.workspace = true
 version.workspace = true
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 arrow-array = { version = "^46.0" }
 arrow-arith = { version = "^46.0" }
@@ -40,6 +43,9 @@ parquet = { version = "^46.0", optional = true, features=["async", "object_store
 
 # optionally used with default client (though not required)
 tokio = { version = "1", optional = true, features=["rt-multi-thread"] }
+
+# for the cffi
+libc = "0.2.147"
 
 [features]
 default = ["default-client"]
