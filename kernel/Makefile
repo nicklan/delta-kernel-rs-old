@@ -18,7 +18,7 @@ $(BINARY): $(OBJECTS)
 	$(CC) $(INCFLAGS) $(CFLAGS) -fPIC $< -o $@
 
 run:
-	LD_LIBRARY_PATH=$(LIBPATHS) ./$(BINARY)
+	LD_LIBRARY_PATH=$(LIBPATHS) ./$(BINARY) $(table)
 
 distclean: clean
 	rm -f $(BINARY)

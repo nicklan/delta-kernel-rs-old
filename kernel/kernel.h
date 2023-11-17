@@ -30,6 +30,20 @@ typedef struct FileSystemClient FileSystemClient;
 typedef struct JsonHandler JsonHandler;
 
 /**
+ * In-memory representation of a specific snapshot of a Delta table. While a `DeltaTable` exists
+ * throughout time, `Snapshot`s represent a view of a table at a specific point in time; they
+ * have a defined schema (which may change over time for any given table), specific version, and
+ * frozen log segment.
+ */
+typedef struct Snapshot_JsonReadContext__ParquetReadContext Snapshot_JsonReadContext__ParquetReadContext;
+
+/**
+ * In-memory representation of a Delta table, which acts as an immutable root entity for reading
+ * the different versions (see [`Snapshot`]) of the table located in storage.
+ */
+typedef struct Table_JsonReadContext__ParquetReadContext Table_JsonReadContext__ParquetReadContext;
+
+/**
  * Create an iterator that can be passed to other kernel functions. The engine MUST NOT free this
  * iterator, but should call `free_iterator` when finished
  */
@@ -58,3 +72,9 @@ struct JsonHandler *create_json_handler(const struct ColumnBatch *(*read_json_fi
  * construct a EngineClient from the specified functions
  */
 struct EngineClient *create_engine_client(const struct FileSystemClient *(*get_file_system_client)(void));
+
+struct Table_JsonReadContext__ParquetReadContext *get_table_with_default_client(const char *path);
+
+struct Snapshot_JsonReadContext__ParquetReadContext *snapshot(struct Table_JsonReadContext__ParquetReadContext *table);
+
+uint64_t version(struct Snapshot_JsonReadContext__ParquetReadContext *snapshot);

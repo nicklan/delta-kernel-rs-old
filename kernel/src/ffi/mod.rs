@@ -1,5 +1,5 @@
 /// Contains code the exposes what an engine needs to call from 'c' to interface with kernel
-//use std::ffi::{CStr, CString};
+use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_void};
 
 /*
@@ -120,4 +120,56 @@ pub extern "C" fn create_engine_client(
         get_file_system_client,
     };
     Box::into_raw(Box::new(client))
+}
+
+
+// stuff for the default client
+use crate::client::executor::tokio::TokioBackgroundExecutor;
+use crate::client::{DefaultTableClient, json::JsonReadContext, parquet::ParquetReadContext};
+use crate::snapshot::Snapshot;
+use crate::{DeltaResult, Table};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::Arc;
+
+#[no_mangle]
+pub extern "C" fn get_table_with_default_client(path: *const c_char) -> *mut Table<JsonReadContext, ParquetReadContext> {
+    let c_str = unsafe { CStr::from_ptr(path) };
+    let path = c_str.to_str().unwrap();
+    let path = std::fs::canonicalize(PathBuf::from(path));
+    let Ok(path) = path else {
+        println!("Couldn't open table: {}", path.err().unwrap());
+        return std::ptr::null_mut();
+    };
+    let Ok(url) = url::Url::from_directory_path(path) else {
+        println!("Invalid url");
+        return std::ptr::null_mut();
+    };
+    let table_client = DefaultTableClient::try_new(
+        &url,
+        HashMap::<String, String>::new(),
+        Arc::new(TokioBackgroundExecutor::new()),
+    );
+    let Ok(table_client) = table_client else {
+        println!(
+            "Failed to construct table client: {}",
+            table_client.err().unwrap()
+        );
+        return std::ptr::null_mut();
+    };
+    let table_client = Arc::new(table_client);
+
+    let table = Table::new(url, table_client.clone());
+    Box::into_raw(Box::new(table))
+}
+
+#[no_mangle]
+pub extern "C" fn snapshot(table: *mut Table<JsonReadContext, ParquetReadContext>) -> *mut Snapshot<JsonReadContext, ParquetReadContext> {
+    let snapshot = unsafe { table.as_ref().unwrap().snapshot(None).unwrap() };
+    Box::into_raw(Box::new(snapshot))
+}
+
+#[no_mangle]
+pub extern "C" fn version(snapshot: *mut Snapshot<JsonReadContext, ParquetReadContext>) -> u64 {
+    unsafe { snapshot.as_ref().unwrap().version() }
 }
