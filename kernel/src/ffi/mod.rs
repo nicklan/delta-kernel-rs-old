@@ -132,8 +132,12 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+type DefaultTable = Table<JsonReadContext, ParquetReadContext>;
+type DefaultSnapshot = Snapshot<JsonReadContext, ParquetReadContext>;
+
+
 #[no_mangle]
-pub extern "C" fn get_table_with_default_client(path: *const c_char) -> *mut Table<JsonReadContext, ParquetReadContext> {
+pub extern "C" fn get_table_with_default_client(path: *const c_char) -> *mut DefaultTable {
     let c_str = unsafe { CStr::from_ptr(path) };
     let path = c_str.to_str().unwrap();
     let path = std::fs::canonicalize(PathBuf::from(path));
@@ -163,13 +167,41 @@ pub extern "C" fn get_table_with_default_client(path: *const c_char) -> *mut Tab
     Box::into_raw(Box::new(table))
 }
 
+
+/// Get the latest snapshot from the specified table
 #[no_mangle]
-pub extern "C" fn snapshot(table: *mut Table<JsonReadContext, ParquetReadContext>) -> *mut Snapshot<JsonReadContext, ParquetReadContext> {
+pub extern "C" fn snapshot(table: *mut DefaultTable) -> *mut DefaultSnapshot {
     let snapshot = unsafe { table.as_ref().unwrap().snapshot(None).unwrap() };
     Box::into_raw(Box::new(snapshot))
 }
 
+/// Get the version of the specified snapshot
 #[no_mangle]
-pub extern "C" fn version(snapshot: *mut Snapshot<JsonReadContext, ParquetReadContext>) -> u64 {
+pub extern "C" fn version(snapshot: *mut DefaultSnapshot) -> u64 {
     unsafe { snapshot.as_ref().unwrap().version() }
+}
+
+#[repr(C)]
+pub struct FileList {
+    files: *mut *mut c_char,
+    file_count: i32,
+}
+
+/// Get a FileList for all the files that need to be read from the table. NB: This _consumes_ the
+/// snapshot, it is no longer valid after making this call (TODO: We should probably fix this?)
+#[no_mangle]
+pub extern "C" fn get_scan_files(snapshot: *mut DefaultSnapshot) -> FileList {
+    let snapshot_box: Box<DefaultSnapshot> = unsafe { Box::from_raw(snapshot) };
+    let scan_adds = snapshot_box.scan().unwrap().build().files().unwrap();
+    let mut file_count = 0;
+    let mut files: Vec<*mut i8> = scan_adds.into_iter().map(|add| {
+        file_count += 1;
+        CString::new(add.unwrap().path).unwrap().into_raw()
+    }).collect();
+    let ptr = files.as_mut_ptr();
+    std::mem::forget(files);
+    FileList {
+        files: ptr,
+        file_count,
+    }
 }

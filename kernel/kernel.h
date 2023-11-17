@@ -43,6 +43,15 @@ typedef struct Snapshot_JsonReadContext__ParquetReadContext Snapshot_JsonReadCon
  */
 typedef struct Table_JsonReadContext__ParquetReadContext Table_JsonReadContext__ParquetReadContext;
 
+typedef struct Table_JsonReadContext__ParquetReadContext DefaultTable;
+
+typedef struct Snapshot_JsonReadContext__ParquetReadContext DefaultSnapshot;
+
+typedef struct FileList {
+  char **files;
+  int32_t file_count;
+} FileList;
+
 /**
  * Create an iterator that can be passed to other kernel functions. The engine MUST NOT free this
  * iterator, but should call `free_iterator` when finished
@@ -73,8 +82,20 @@ struct JsonHandler *create_json_handler(const struct ColumnBatch *(*read_json_fi
  */
 struct EngineClient *create_engine_client(const struct FileSystemClient *(*get_file_system_client)(void));
 
-struct Table_JsonReadContext__ParquetReadContext *get_table_with_default_client(const char *path);
+DefaultTable *get_table_with_default_client(const char *path);
 
-struct Snapshot_JsonReadContext__ParquetReadContext *snapshot(struct Table_JsonReadContext__ParquetReadContext *table);
+/**
+ * Get the latest snapshot from the specified table
+ */
+DefaultSnapshot *snapshot(DefaultTable *table);
 
-uint64_t version(struct Snapshot_JsonReadContext__ParquetReadContext *snapshot);
+/**
+ * Get the version of the specified snapshot
+ */
+uint64_t version(DefaultSnapshot *snapshot);
+
+/**
+ * Get a FileList for all the files that need to be read from the table. NB: This _consumes_ the
+ * snapshot, it is no longer valid after making this call (TODO: We should probably fix this?)
+ */
+struct FileList get_scan_files(DefaultSnapshot *snapshot);

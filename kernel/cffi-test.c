@@ -34,9 +34,6 @@ void test_iter() {
   iterate(eit);
 }
 
-typedef Table_JsonReadContext__ParquetReadContext Table;
-typedef Snapshot_JsonReadContext__ParquetReadContext Snapshot;
-
 int main(int argc, char* argv[]) {
 
   if (argc < 2) {
@@ -46,10 +43,16 @@ int main(int argc, char* argv[]) {
 
   char* table_path = argv[1];
   printf("Opening table at %s\n", table_path);
-  Table *table = get_table_with_default_client(table_path);
-  Snapshot *ss = snapshot(table);
+  DefaultTable *table = get_table_with_default_client(table_path);
+  DefaultSnapshot *ss = snapshot(table);
   uint64_t v = version(ss);
   printf("Got version: %lu\n", v);
+
+  struct FileList fl = get_scan_files(ss);
+  printf("Need to read %i files\n", fl.file_count);
+  for (int i = 0;i < fl.file_count;i++) {
+    printf("file %i -> %s\n", i, fl.files[i]);
+  }
   
   return 0;
 }
