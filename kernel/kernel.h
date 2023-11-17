@@ -33,21 +33,28 @@ typedef struct JsonHandler JsonHandler;
  * Create an iterator that can be passed to other kernel functions. The engine MUST NOT free this
  * iterator, but should call `free_iterator` when finished
  */
-struct EngineIterator *create_iterator(const void *data,
-                                       const void *(**get_next)(const void *data));
+struct EngineIterator *create_iterator(void *data,
+                                       const void *(*get_next)(void *data),
+                                       void (*release)(void *data));
+
+/**
+ * test function to print for items. this assumes each item is an `int`, and will release the
+ * iterator after printing the items
+ */
+void iterate(struct EngineIterator *engine_iter);
 
 /**
  * construct a FileSystemClient from the specified functions
  */
-struct FileSystemClient *create_filesystem_client(struct EngineIterator *(**list_from)(const char *path));
+struct FileSystemClient *create_filesystem_client(struct EngineIterator *(*list_from)(const char *path));
 
 /**
  * construct a JsonHandler from the specified functions
  */
-struct JsonHandler *create_json_handler(const struct ColumnBatch *(**read_json_files)(const char *const *files,
-                                                                                      int file_count));
+struct JsonHandler *create_json_handler(const struct ColumnBatch *(*read_json_files)(const char *const *files,
+                                                                                     int file_count));
 
 /**
  * construct a EngineClient from the specified functions
  */
-struct EngineClient *create_engine_client(const struct FileSystemClient *(**get_file_system_client)(void));
+struct EngineClient *create_engine_client(const struct FileSystemClient *(*get_file_system_client)(void));
