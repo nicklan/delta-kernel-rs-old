@@ -9,7 +9,7 @@ readme.workspace = true
 version.workspace = true
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+crate-type = ["cdylib", "staticlib", "rlib"]
 
 [dependencies]
 arrow-array = { version = "^46.0" }
