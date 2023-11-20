@@ -11,6 +11,23 @@ use std::os::raw::{c_char, c_int, c_void};
  */
 
 
+// WARNING: the visitor MUST NOT retain internal references to the c_char names passed to visitor methods
+// TODO: other types, nullability
+#[repr(C)]
+pub struct EngineSchemaVisitor {
+    // opaque state pointer
+    data: *mut c_void,
+    // Creates a new field list, optionally reserving capacity up front
+    make_field_list: extern fn(data: *mut c_void, reserve: usize) -> *mut c_void,
+    // Frees an existing field list that will not be returned to the engine (e.g. on error)
+    free_field_list: extern fn(data: *mut c_void, siblings: *mut c_void) -> (),
+    // visitor methods that should instantiate and append the appropriate type to the field list
+    visit_struct: extern fn(data: *mut c_void, siblings: *mut c_void, name: *const c_char, children: *mut c_void) -> (),
+    visit_string: extern fn(data: *mut c_void, siblings: *mut c_void, name: *const c_char) -> (),
+    visit_integer: extern fn(data: *mut c_void, siblings: *mut c_void, name: *const c_char) -> (),
+    visit_long: extern fn(data: *mut c_void, siblings: *mut c_void, name: *const c_char) -> (),
+}
+
 /// Model iterators. This allows an engine to specify iteration however it likes, and we simply wrap
 /// the engine functions.
 pub struct EngineIterator {
@@ -127,7 +144,8 @@ pub extern "C" fn create_engine_client(
 use crate::client::executor::tokio::TokioBackgroundExecutor;
 use crate::client::{DefaultTableClient, json::JsonReadContext, parquet::ParquetReadContext};
 use crate::snapshot::Snapshot;
-use crate::{DeltaResult, Table};
+use crate::schema::{DataType, PrimitiveType, StructField, StructType};
+use crate::Table;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -179,6 +197,40 @@ pub extern "C" fn snapshot(table: *mut DefaultTable) -> *mut DefaultSnapshot {
 #[no_mangle]
 pub extern "C" fn version(snapshot: *mut DefaultSnapshot) -> u64 {
     unsafe { snapshot.as_ref().unwrap().version() }
+}
+
+#[no_mangle]
+pub extern "C" fn visit_schema(snapshot: *mut DefaultSnapshot, engine_visitor: *mut EngineSchemaVisitor) -> *mut c_void {
+    // Visit all the fields of a struct and return the list of children
+    fn visit_struct_fields(visitor: &EngineSchemaVisitor, s: &StructType) -> *mut c_void {
+        let children = (visitor.make_field_list)(visitor.data, s.fields.len());
+        for field in s.fields.iter() {
+            visit_field(visitor, children, field);
+        }
+        children
+    }
+
+    // Visit a struct field (recursively) and add the result to the list of siblings.
+    fn visit_field(visitor: &EngineSchemaVisitor, siblings: *mut c_void, field: &StructField) -> () {
+        let name = CString::new(field.name.as_bytes()).unwrap();
+        match &field.data_type {
+            DataType::Primitive(PrimitiveType::Integer) =>
+                (visitor.visit_integer)(visitor.data, siblings, name.as_ptr()),
+            DataType::Primitive(PrimitiveType::Long) =>
+                (visitor.visit_long)(visitor.data, siblings, name.as_ptr()),
+            DataType::Primitive(PrimitiveType::String) =>
+                (visitor.visit_string)(visitor.data, siblings, name.as_ptr()),
+            DataType::Struct(s) => {
+                let children = visit_struct_fields(visitor, &s);
+                (visitor.visit_struct)(visitor.data, siblings, name.as_ptr(), children);
+            },
+            other => println!("Unsupported data type: {}", other),
+        }
+    }
+
+    let visitor: &mut EngineSchemaVisitor = unsafe { &mut *engine_visitor };
+    let schema: StructType = unsafe { snapshot.as_ref().unwrap().schema().unwrap() };
+    visit_struct_fields(visitor, &schema)
 }
 
 #[repr(C)]

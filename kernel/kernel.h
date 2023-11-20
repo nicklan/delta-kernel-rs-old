@@ -47,6 +47,16 @@ typedef struct Table_JsonReadContext__ParquetReadContext DefaultTable;
 
 typedef struct Snapshot_JsonReadContext__ParquetReadContext DefaultSnapshot;
 
+typedef struct EngineSchemaVisitor {
+  void *data;
+  void *(*make_field_list)(void *data, uintptr_t reserve);
+  void (*free_field_list)(void *data, void *siblings);
+  void (*visit_struct)(void *data, void *siblings, const char *name, void *children);
+  void (*visit_string)(void *data, void *siblings, const char *name);
+  void (*visit_integer)(void *data, void *siblings, const char *name);
+  void (*visit_long)(void *data, void *siblings, const char *name);
+} EngineSchemaVisitor;
+
 typedef struct FileList {
   char **files;
   int32_t file_count;
@@ -93,6 +103,8 @@ DefaultSnapshot *snapshot(DefaultTable *table);
  * Get the version of the specified snapshot
  */
 uint64_t version(DefaultSnapshot *snapshot);
+
+void *visit_schema(DefaultSnapshot *snapshot, struct EngineSchemaVisitor *engine_visitor);
 
 /**
  * Get a FileList for all the files that need to be read from the table. NB: This _consumes_ the
