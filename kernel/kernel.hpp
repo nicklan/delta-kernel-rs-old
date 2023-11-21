@@ -4,21 +4,9 @@
 #include <ostream>
 #include <new>
 
-/// Whatever we decide this should be
-struct ColumnBatch;
-
-/// Top level client that gets passed into most functions
-struct EngineClient;
-
 /// Model iterators. This allows an engine to specify iteration however it likes, and we simply wrap
 /// the engine functions.
 struct EngineIterator;
-
-/// A client for talking to the filesystem
-struct FileSystemClient;
-
-/// A client for reading json
-struct JsonHandler;
 
 struct JsonReadContext;
 
@@ -66,16 +54,6 @@ EngineIterator *create_iterator(void *data,
 /// test function to print for items. this assumes each item is an `int`, and will release the
 /// iterator after printing the items
 void iterate(EngineIterator *engine_iter);
-
-/// construct a FileSystemClient from the specified functions
-FileSystemClient *create_filesystem_client(EngineIterator *(*list_from)(const char *path));
-
-/// construct a JsonHandler from the specified functions
-JsonHandler *create_json_handler(const ColumnBatch *(*read_json_files)(const char *const *files,
-                                                                       int file_count));
-
-/// construct a EngineClient from the specified functions
-EngineClient *create_engine_client(const FileSystemClient *(*get_file_system_client)());
 
 DefaultTable *get_table_with_default_client(const char *path);
 

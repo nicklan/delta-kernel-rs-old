@@ -4,30 +4,10 @@
 #include <stdlib.h>
 
 /**
- * Whatever we decide this should be
- */
-typedef struct ColumnBatch ColumnBatch;
-
-/**
- * Top level client that gets passed into most functions
- */
-typedef struct EngineClient EngineClient;
-
-/**
  * Model iterators. This allows an engine to specify iteration however it likes, and we simply wrap
  * the engine functions.
  */
 typedef struct EngineIterator EngineIterator;
-
-/**
- * A client for talking to the filesystem
- */
-typedef struct FileSystemClient FileSystemClient;
-
-/**
- * A client for reading json
- */
-typedef struct JsonHandler JsonHandler;
 
 /**
  * In-memory representation of a specific snapshot of a Delta table. While a `DeltaTable` exists
@@ -75,22 +55,6 @@ struct EngineIterator *create_iterator(void *data,
  * iterator after printing the items
  */
 void iterate(struct EngineIterator *engine_iter);
-
-/**
- * construct a FileSystemClient from the specified functions
- */
-struct FileSystemClient *create_filesystem_client(struct EngineIterator *(*list_from)(const char *path));
-
-/**
- * construct a JsonHandler from the specified functions
- */
-struct JsonHandler *create_json_handler(const struct ColumnBatch *(*read_json_files)(const char *const *files,
-                                                                                     int file_count));
-
-/**
- * construct a EngineClient from the specified functions
- */
-struct EngineClient *create_engine_client(const struct FileSystemClient *(*get_file_system_client)(void));
 
 DefaultTable *get_table_with_default_client(const char *path);
 

@@ -91,54 +91,24 @@ impl Drop for EngineIterator {
 /// Whatever we decide this should be
 pub struct ColumnBatch;
 
-/// A client for talking to the filesystem
-pub struct FileSystemClient {
+/// A struct with function pointers for all the operations a FileSystemClient must support
+#[repr(C)]
+pub struct FileSystemClientOps {
     list_from: extern fn(path: *const c_char) -> *mut EngineIterator,
 }
 
-/// construct a FileSystemClient from the specified functions
-#[no_mangle]
-pub extern "C" fn create_filesystem_client(
-    list_from: extern fn(path: *const c_char) -> *mut EngineIterator,
-) -> *mut FileSystemClient {
-    let client = FileSystemClient { list_from };
-    Box::into_raw(Box::new(client))
-}
-
-/// A client for reading json
-pub struct JsonHandler {
+/// A struct with function pointers for all the operations a JsonHandler must support
+#[repr(C)]
+pub struct JsonHandlerOps {
     read_json_files:
          extern fn(files: *const *const c_char, file_count: c_int) -> *const ColumnBatch, // schema?
 }
 
-/// construct a JsonHandler from the specified functions
-#[no_mangle]
-pub extern "C" fn create_json_handler(
-    read_json_files: extern fn(
-        files: *const *const c_char,
-        file_count: c_int,
-    ) -> *const ColumnBatch,
-) -> *mut JsonHandler {
-    let handler = JsonHandler { read_json_files };
-    Box::into_raw(Box::new(handler))
+/// A struct with function pointers for all the operations a top level client must perform
+#[repr(C)]
+pub struct EngineClientOps {
+    get_file_system_client: extern fn() -> *const FileSystemClientOps,
 }
-
-/// Top level client that gets passed into most functions
-pub struct EngineClient {
-    get_file_system_client: extern fn() -> *const FileSystemClient,
-}
-
-/// construct a EngineClient from the specified functions
-#[no_mangle]
-pub extern "C" fn create_engine_client(
-    get_file_system_client: extern fn() -> *const FileSystemClient,
-) -> *mut EngineClient {
-    let client = EngineClient {
-        get_file_system_client,
-    };
-    Box::into_raw(Box::new(client))
-}
-
 
 // stuff for the default client
 use crate::client::executor::tokio::TokioBackgroundExecutor;
