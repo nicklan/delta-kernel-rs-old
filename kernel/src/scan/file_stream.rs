@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use super::data_skipping::data_skipping_filter;
 use crate::actions::{parse_actions, Action, ActionType, Add};
 use crate::expressions::Expression;
+use crate::schema::SchemaRef;
 use crate::DeltaResult;
 use arrow_array::RecordBatch;
 use either::Either;
@@ -27,9 +28,9 @@ impl LogReplayScanner {
     /// Extract Add actions from a single batch. This will filter out rows that
     /// don't match the predicate and Add actions that have corresponding Remove
     /// actions in the log.
-    fn process_batch(&mut self, actions: RecordBatch) -> DeltaResult<Vec<Add>> {
+    fn process_batch(&mut self, table_schema: &SchemaRef, actions: RecordBatch) -> DeltaResult<Vec<Add>> {
         let actions = if let Some(predicate) = &self.predicate {
-            data_skipping_filter(actions, predicate)?
+            data_skipping_filter(actions, &table_schema, predicate)?
         } else {
             actions
         };
@@ -63,12 +64,13 @@ impl LogReplayScanner {
 /// Given an iterator of actions and a predicate, returns a stream of [Add]
 pub fn log_replay_iter(
     action_iter: impl Iterator<Item = DeltaResult<RecordBatch>>,
+    table_schema: SchemaRef,
     predicate: Option<Expression>,
 ) -> impl Iterator<Item = DeltaResult<Add>> {
     let mut log_scanner = LogReplayScanner::new(predicate);
 
     action_iter.flat_map(move |actions| match actions {
-        Ok(actions) => match log_scanner.process_batch(actions) {
+        Ok(actions) => match log_scanner.process_batch(&table_schema, actions) {
             Ok(adds) => Either::Left(adds.into_iter().map(Ok)),
             Err(err) => Either::Right(std::iter::once(Err(err))),
         },

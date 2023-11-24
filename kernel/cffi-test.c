@@ -30,8 +30,11 @@ void test_iter() {
   it.lim = 10;
   it.cur = 0;
 
-  EngineIterator *eit = create_iterator(&it, &next, &release);
-  iterate(eit);
+  struct EngineIterator eit = {
+    .data = &it,
+    .get_next = &next,
+  };
+  iterate(&eit);
 }
 
 int main(int argc, char* argv[]) {
@@ -48,11 +51,12 @@ int main(int argc, char* argv[]) {
   uint64_t v = version(ss);
   printf("Got version: %lu\n", v);
 
-  struct FileList fl = get_scan_files(ss);
+  struct FileList fl = get_scan_files(ss, NULL);
   printf("Need to read %i files\n", fl.file_count);
   for (int i = 0;i < fl.file_count;i++) {
     printf("file %i -> %s\n", i, fl.files[i]);
   }
-  
+
+  test_iter();
   return 0;
 }

@@ -1,5 +1,5 @@
 use arrow_array::{
-    array::PrimitiveArray, types::Int32Type, BooleanArray, Int32Array, RecordBatch, StructArray,
+    array::PrimitiveArray, types::Int64Type, BooleanArray, Int64Array, RecordBatch, StructArray,
 };
 use arrow_ord::cmp::lt;
 use std::{
@@ -211,7 +211,7 @@ impl Expression {
                         match (left.as_ref(), right.as_ref()) {
                             (Expression::Column(name), Expression::Literal(l)) => {
                                 let literal_value = match l {
-                                    Scalar::Integer(v) => *v,
+                                    Scalar::Long(v) => *v,
                                     _ => todo!(),
                                 };
                                 // column_min < value
@@ -232,12 +232,12 @@ impl Expression {
                                             name
                                         )))?
                                         .as_any()
-                                        .downcast_ref::<Int32Array>()
+                                        .downcast_ref::<Int64Array>()
                                         .ok_or(ArrowError::SchemaError(format!(
                                             "{} is not an int",
                                             name
                                         )))?,
-                                    &PrimitiveArray::<Int32Type>::new_scalar(literal_value),
+                                    &PrimitiveArray::<Int64Type>::new_scalar(literal_value),
                                 )
                             }
                             _ => todo!(),

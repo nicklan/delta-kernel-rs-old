@@ -3,11 +3,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-/**
- * Model iterators. This allows an engine to specify iteration however it likes, and we simply wrap
- * the engine functions.
- */
-typedef struct EngineIterator EngineIterator;
+typedef struct KernelExpressionVisitorState KernelExpressionVisitorState;
 
 /**
  * In-memory representation of a specific snapshot of a Delta table. While a `DeltaTable` exists
@@ -22,6 +18,15 @@ typedef struct Snapshot_JsonReadContext__ParquetReadContext Snapshot_JsonReadCon
  * the different versions (see [`Snapshot`]) of the table located in storage.
  */
 typedef struct Table_JsonReadContext__ParquetReadContext Table_JsonReadContext__ParquetReadContext;
+
+/**
+ * Model iterators. This allows an engine to specify iteration however it likes, and we simply wrap
+ * the engine functions. The engine retains ownership of the iterator.
+ */
+typedef struct EngineIterator {
+  void *data;
+  const void *(*get_next)(void *data);
+} EngineIterator;
 
 typedef struct Table_JsonReadContext__ParquetReadContext DefaultTable;
 
@@ -42,19 +47,15 @@ typedef struct FileList {
   int32_t file_count;
 } FileList;
 
-/**
- * Create an iterator that can be passed to other kernel functions. The engine MUST NOT free this
- * iterator, but should call `free_iterator` when finished
- */
-struct EngineIterator *create_iterator(void *data,
-                                       const void *(*get_next)(void *data),
-                                       void (*release)(void *data));
+typedef struct EnginePredicate {
+  void *predicate;
+  uintptr_t (*visitor)(void *predicate, struct KernelExpressionVisitorState *state);
+} EnginePredicate;
 
 /**
- * test function to print for items. this assumes each item is an `int`, and will release the
- * iterator after printing the items
+ * test function to print for items. this assumes each item is an `int`
  */
-void iterate(struct EngineIterator *engine_iter);
+void iterate(struct EngineIterator *it);
 
 DefaultTable *get_table_with_default_client(const char *path);
 
@@ -68,10 +69,22 @@ DefaultSnapshot *snapshot(DefaultTable *table);
  */
 uint64_t version(DefaultSnapshot *snapshot);
 
-void *visit_schema(DefaultSnapshot *snapshot, struct EngineSchemaVisitor *engine_visitor);
+void *visit_schema(DefaultSnapshot *snapshot, struct EngineSchemaVisitor *visitor);
+
+uintptr_t visit_expression_and(struct KernelExpressionVisitorState *state,
+                               struct EngineIterator *children);
+
+uintptr_t visit_expression_lt(struct KernelExpressionVisitorState *state, uintptr_t a, uintptr_t b);
+
+uintptr_t visit_expression_column(struct KernelExpressionVisitorState *state, const char *name);
+
+uintptr_t visit_expression_literal_string(struct KernelExpressionVisitorState *state,
+                                          const char *value);
+
+uintptr_t visit_expression_literal_long(struct KernelExpressionVisitorState *state, int64_t value);
 
 /**
  * Get a FileList for all the files that need to be read from the table. NB: This _consumes_ the
  * snapshot, it is no longer valid after making this call (TODO: We should probably fix this?)
  */
-struct FileList get_scan_files(DefaultSnapshot *snapshot);
+struct FileList get_scan_files(DefaultSnapshot *snapshot, struct EnginePredicate *predicate);

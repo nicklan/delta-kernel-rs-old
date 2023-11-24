@@ -4,11 +4,9 @@
 #include <ostream>
 #include <new>
 
-/// Model iterators. This allows an engine to specify iteration however it likes, and we simply wrap
-/// the engine functions.
-struct EngineIterator;
-
 struct JsonReadContext;
+
+struct KernelExpressionVisitorState;
 
 struct ParquetReadContext;
 
@@ -23,6 +21,13 @@ struct Snapshot;
 /// the different versions (see [`Snapshot`]) of the table located in storage.
 template<typename JRC = void, typename PRC = void>
 struct Table;
+
+/// Model iterators. This allows an engine to specify iteration however it likes, and we simply wrap
+/// the engine functions. The engine retains ownership of the iterator.
+struct EngineIterator {
+  void *data;
+  const void *(*get_next)(void *data);
+};
 
 using DefaultTable = Table<JsonReadContext, ParquetReadContext>;
 
@@ -43,17 +48,15 @@ struct FileList {
   int32_t file_count;
 };
 
+struct EnginePredicate {
+  void *predicate;
+  uintptr_t (*visitor)(void *predicate, KernelExpressionVisitorState *state);
+};
+
 extern "C" {
 
-/// Create an iterator that can be passed to other kernel functions. The engine MUST NOT free this
-/// iterator, but should call `free_iterator` when finished
-EngineIterator *create_iterator(void *data,
-                                const void *(*get_next)(void *data),
-                                void (*release)(void *data));
-
-/// test function to print for items. this assumes each item is an `int`, and will release the
-/// iterator after printing the items
-void iterate(EngineIterator *engine_iter);
+/// test function to print for items. this assumes each item is an `int`
+void iterate(EngineIterator *it);
 
 DefaultTable *get_table_with_default_client(const char *path);
 
@@ -63,10 +66,20 @@ DefaultSnapshot *snapshot(DefaultTable *table);
 /// Get the version of the specified snapshot
 uint64_t version(DefaultSnapshot *snapshot);
 
-void *visit_schema(DefaultSnapshot *snapshot, EngineSchemaVisitor *engine_visitor);
+void *visit_schema(DefaultSnapshot *snapshot, EngineSchemaVisitor *visitor);
+
+uintptr_t visit_expression_and(KernelExpressionVisitorState *state, EngineIterator *children);
+
+uintptr_t visit_expression_lt(KernelExpressionVisitorState *state, uintptr_t a, uintptr_t b);
+
+uintptr_t visit_expression_column(KernelExpressionVisitorState *state, const char *name);
+
+uintptr_t visit_expression_literal_string(KernelExpressionVisitorState *state, const char *value);
+
+uintptr_t visit_expression_literal_long(KernelExpressionVisitorState *state, int64_t value);
 
 /// Get a FileList for all the files that need to be read from the table. NB: This _consumes_ the
 /// snapshot, it is no longer valid after making this call (TODO: We should probably fix this?)
-FileList get_scan_files(DefaultSnapshot *snapshot);
+FileList get_scan_files(DefaultSnapshot *snapshot, EnginePredicate *predicate);
 
 } // extern "C"
