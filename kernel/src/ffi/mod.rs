@@ -20,14 +20,12 @@ pub struct EngineSchemaVisitor {
     // opaque state pointer
     data: *mut c_void,
     // Creates a new field list, optionally reserving capacity up front
-    make_field_list: extern fn(data: *mut c_void, reserve: usize) -> *mut c_void,
-    // Frees an existing field list that will not be returned to the engine (e.g. on error)
-    free_field_list: extern fn(data: *mut c_void, siblings: *mut c_void) -> (),
+    make_field_list: extern fn(data: *mut c_void, reserve: usize) -> usize,
     // visitor methods that should instantiate and append the appropriate type to the field list
-    visit_struct: extern fn(data: *mut c_void, siblings: *mut c_void, name: *const c_char, children: *mut c_void) -> (),
-    visit_string: extern fn(data: *mut c_void, siblings: *mut c_void, name: *const c_char) -> (),
-    visit_integer: extern fn(data: *mut c_void, siblings: *mut c_void, name: *const c_char) -> (),
-    visit_long: extern fn(data: *mut c_void, siblings: *mut c_void, name: *const c_char) -> (),
+    visit_struct: extern fn(data: *mut c_void, sibling_list_id: usize, name: *const c_char, child_list_id: usize) -> (),
+    visit_string: extern fn(data: *mut c_void, sibling_list_id: usize, name: *const c_char) -> (),
+    visit_integer: extern fn(data: *mut c_void, sibling_list_id: usize, name: *const c_char) -> (),
+    visit_long: extern fn(data: *mut c_void, sibling_list_id: usize, name: *const c_char) -> (),
 }
 
 /// Model iterators. This allows an engine to specify iteration however it likes, and we simply wrap
@@ -146,29 +144,29 @@ pub extern "C" fn version(snapshot: &mut DefaultSnapshot) -> u64 {
 }
 
 #[no_mangle]
-pub extern "C" fn visit_schema(snapshot: &mut DefaultSnapshot, visitor: &mut EngineSchemaVisitor) -> *mut c_void {
+pub extern "C" fn visit_schema(snapshot: &mut DefaultSnapshot, visitor: &mut EngineSchemaVisitor) -> usize {
     // Visit all the fields of a struct and return the list of children
-    fn visit_struct_fields(visitor: &EngineSchemaVisitor, s: &StructType) -> *mut c_void {
-        let children = (visitor.make_field_list)(visitor.data, s.fields.len());
+    fn visit_struct_fields(visitor: &EngineSchemaVisitor, s: &StructType) -> usize {
+        let child_list_id = (visitor.make_field_list)(visitor.data, s.fields.len());
         for field in s.fields.iter() {
-            visit_field(visitor, children, field);
+            visit_field(visitor, child_list_id, field);
         }
-        children
+        child_list_id
     }
 
     // Visit a struct field (recursively) and add the result to the list of siblings.
-    fn visit_field(visitor: &EngineSchemaVisitor, siblings: *mut c_void, field: &StructField) -> () {
+    fn visit_field(visitor: &EngineSchemaVisitor, sibling_list_id: usize, field: &StructField) -> () {
         let name = CString::new(field.name.as_bytes()).unwrap();
         match &field.data_type {
             DataType::Primitive(PrimitiveType::Integer) =>
-                (visitor.visit_integer)(visitor.data, siblings, name.as_ptr()),
+                (visitor.visit_integer)(visitor.data, sibling_list_id, name.as_ptr()),
             DataType::Primitive(PrimitiveType::Long) =>
-                (visitor.visit_long)(visitor.data, siblings, name.as_ptr()),
+                (visitor.visit_long)(visitor.data, sibling_list_id, name.as_ptr()),
             DataType::Primitive(PrimitiveType::String) =>
-                (visitor.visit_string)(visitor.data, siblings, name.as_ptr()),
+                (visitor.visit_string)(visitor.data, sibling_list_id, name.as_ptr()),
             DataType::Struct(s) => {
-                let children = visit_struct_fields(visitor, &s);
-                (visitor.visit_struct)(visitor.data, siblings, name.as_ptr(), children);
+                let child_list_id = visit_struct_fields(visitor, &s);
+                (visitor.visit_struct)(visitor.data, sibling_list_id, name.as_ptr(), child_list_id);
             },
             other => println!("Unsupported data type: {}", other),
         }
@@ -181,7 +179,7 @@ pub extern "C" fn visit_schema(snapshot: &mut DefaultSnapshot, visitor: &mut Eng
 // A set that can identify its contents by address
 struct ReferenceSet<T> {
     map: std::collections::HashMap<usize, T>,
-    id: usize,
+    next_id: usize,
 }
 
 impl<T> ReferenceSet<T> {
@@ -194,10 +192,10 @@ impl<T> ReferenceSet<T> {
     // Returns a raw pointer to the value. This pointer serves as a key that
     // can be used later to take() from the set, and should NOT be dereferenced.
     fn insert(&mut self, value: T) -> usize {
-        let i = self.id;
-        self.id += 1;
-        self.map.insert(i, value);
-        i
+        let id = self.next_id;
+        self.next_id += 1;
+        self.map.insert(id, value);
+        id
     }
 
     // Attempts to remove a value from the set, if present.
@@ -206,8 +204,8 @@ impl<T> ReferenceSet<T> {
     }
 
     // True if the set contains an object whose address matches the pointer.
-    fn contains(&self, i: usize) -> bool {
-        self.map.contains_key(&i)
+    fn contains(&self, id: usize) -> bool {
+        self.map.contains_key(&id)
     }
 
     // The current size of the set.
@@ -218,7 +216,7 @@ impl<T> ReferenceSet<T> {
 
 impl<T> Default for ReferenceSet<T> {
     fn default() -> Self {
-        Self{map: Default::default(), id: 1}
+        Self{map: Default::default(), next_id: 1}
     }
 }
 
@@ -297,6 +295,16 @@ pub extern "C" fn visit_expression_and(state: &mut KernelExpressionVisitorState,
 #[no_mangle]
 pub extern "C" fn visit_expression_lt(state: &mut KernelExpressionVisitorState, a: usize, b: usize) -> usize {
     visit_expression_binary(state, BinaryOperator::LessThan, a, b)
+}
+
+#[no_mangle]
+pub extern "C" fn visit_expression_gt(state: &mut KernelExpressionVisitorState, a: usize, b: usize) -> usize {
+    visit_expression_binary(state, BinaryOperator::GreaterThan, a, b)
+}
+
+#[no_mangle]
+pub extern "C" fn visit_expression_eq(state: &mut KernelExpressionVisitorState, a: usize, b: usize) -> usize {
+    visit_expression_binary(state, BinaryOperator::Equal, a, b)
 }
 
 #[no_mangle]

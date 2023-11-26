@@ -35,12 +35,14 @@ using DefaultSnapshot = Snapshot<JsonReadContext, ParquetReadContext>;
 
 struct EngineSchemaVisitor {
   void *data;
-  void *(*make_field_list)(void *data, uintptr_t reserve);
-  void (*free_field_list)(void *data, void *siblings);
-  void (*visit_struct)(void *data, void *siblings, const char *name, void *children);
-  void (*visit_string)(void *data, void *siblings, const char *name);
-  void (*visit_integer)(void *data, void *siblings, const char *name);
-  void (*visit_long)(void *data, void *siblings, const char *name);
+  uintptr_t (*make_field_list)(void *data, uintptr_t reserve);
+  void (*visit_struct)(void *data,
+                       uintptr_t sibling_list_id,
+                       const char *name,
+                       uintptr_t child_list_id);
+  void (*visit_string)(void *data, uintptr_t sibling_list_id, const char *name);
+  void (*visit_integer)(void *data, uintptr_t sibling_list_id, const char *name);
+  void (*visit_long)(void *data, uintptr_t sibling_list_id, const char *name);
 };
 
 struct FileList {
@@ -66,11 +68,15 @@ DefaultSnapshot *snapshot(DefaultTable *table);
 /// Get the version of the specified snapshot
 uint64_t version(DefaultSnapshot *snapshot);
 
-void *visit_schema(DefaultSnapshot *snapshot, EngineSchemaVisitor *visitor);
+uintptr_t visit_schema(DefaultSnapshot *snapshot, EngineSchemaVisitor *visitor);
 
 uintptr_t visit_expression_and(KernelExpressionVisitorState *state, EngineIterator *children);
 
 uintptr_t visit_expression_lt(KernelExpressionVisitorState *state, uintptr_t a, uintptr_t b);
+
+uintptr_t visit_expression_gt(KernelExpressionVisitorState *state, uintptr_t a, uintptr_t b);
+
+uintptr_t visit_expression_eq(KernelExpressionVisitorState *state, uintptr_t a, uintptr_t b);
 
 uintptr_t visit_expression_column(KernelExpressionVisitorState *state, const char *name);
 

@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 use std::io::BufReader;
-use std::sync::Arc;
 
 use arrow_arith::boolean::{is_not_null, not};
 use arrow_array::{new_null_array, RecordBatch, StringArray, StructArray};
@@ -20,6 +19,7 @@ pub(crate) fn data_skipping_filter(
     table_schema: &SchemaRef,
     predicate: &Expression,
 ) -> DeltaResult<RecordBatch> {
+    println!("data_skipping_filter called with {}", &predicate);
     let adds = actions
         .column_by_name("add")
         .ok_or(Error::MissingColumn("Column 'add' not found.".into()))?
@@ -44,40 +44,45 @@ pub(crate) fn data_skipping_filter(
     // Build the stats read schema by extracting the column names referenced by the predicate,
     // extracting the corresponding field from the table schema, and inserting that field.
     let data_fields: Vec<_> = table_schema.fields.iter()
-        .filter(|field| field_names.contains(&field.name as &str))
+        .filter(|field| field_names.contains(&field.name.as_str()))
         .filter_map(|field| Field::try_from(field).ok())
         .collect::<Vec<_>>();
 
     let stats_schema = Schema::new(vec![
-        Field::new(
-            "minValues",
-            DataType::Struct(data_fields.clone().into()),
-            true,
-        ),
+        Field::new("minValues", DataType::Struct(data_fields.clone().into()), true),
         Field::new("maxValues", DataType::Struct(data_fields.clone().into()), true),
     ]);
     let parsed = concat_batches(
         &stats_schema.clone().into(),
         stats
             .iter()
-            .map(|json_string| hack_parse(&data_fields, &stats_schema, json_string))
+            .map(|json_string| hack_parse(&stats_schema, json_string))
             .collect::<Result<Vec<_>, _>>()?
             .iter(),
     )?;
 
-    let skipping_vector = predicate.construct_metadata_filters(parsed)?;
-    let skipping_vector = &is_not_null(&nullif(&skipping_vector, &not(&skipping_vector)?)?)?;
+    match predicate.extract_metadata_filters(&parsed) {
+        Some(filter) => {
+            println!("data_skipping_filter: filter is valid");
+            let skipping_vector = filter()?;
+            let skipping_vector = &is_not_null(&nullif(&skipping_vector, &not(&skipping_vector)?)?)?;
 
-    let before_count = actions.num_rows();
-    let after = filter_record_batch(&actions, skipping_vector)?;
-    debug!(
-        "number of actions before/after data skipping: {before_count} / {}",
-        after.num_rows()
-    );
-    Ok(after)
+            let before_count = actions.num_rows();
+            let after = filter_record_batch(&actions, skipping_vector)?;
+            debug!(
+                "number of actions before/after data skipping: {before_count} / {}",
+                after.num_rows()
+            );
+            Ok(after)
+        }
+        _ => {
+            println!("data_skipping_filter: filter was not valid");
+            Ok(actions)
+        }
+    }
 }
 
-fn hack_parse(data_fields: &Vec<Field>, stats_schema: &Schema, json_string: Option<&str>) -> DeltaResult<RecordBatch> {
+fn hack_parse(stats_schema: &Schema, json_string: Option<&str>) -> DeltaResult<RecordBatch> {
     match json_string {
         Some(s) => Ok(ReaderBuilder::new(stats_schema.clone().into())
             .build(BufReader::new(s.as_bytes()))?
@@ -88,13 +93,9 @@ fn hack_parse(data_fields: &Vec<Field>, stats_schema: &Schema, json_string: Opti
             .ok_or(Error::MissingData("Expected data".into()))?),
         None => Ok(RecordBatch::try_new(
             stats_schema.clone().into(),
-            vec![
-                Arc::new(new_null_array(
-                    &DataType::Struct(data_fields.clone().into()),
-                    1,
-                )),
-                Arc::new(new_null_array(&DataType::Struct(data_fields.clone().into()), 1)),
-            ],
+            stats_schema.fields.iter()
+                .map(|field| new_null_array(&field.data_type(), 1))
+                .collect()
         )?),
     }
 }
