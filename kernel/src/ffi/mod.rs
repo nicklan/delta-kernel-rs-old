@@ -271,7 +271,7 @@ fn visit_expression_binary(state: &mut KernelExpressionVisitorState, op: BinaryO
     }
 }
 
-// Not thread safe, not reentrant, not owned by callee, not freed by callee.
+// The EngineIterator is not thread safe, not reentrant, not owned by callee, not freed by callee.
 #[no_mangle]
 pub extern "C" fn visit_expression_and(state: &mut KernelExpressionVisitorState, children: &mut EngineIterator) -> usize {
     let mut children = children.flat_map(|child| unwrap_kernel_expression(state, child as usize));
@@ -335,6 +335,12 @@ pub extern "C" fn get_scan_files(snapshot: *mut DefaultSnapshot, predicate: Opti
     let snapshot_box: Box<DefaultSnapshot> = unsafe { Box::from_raw(snapshot) };
     let mut scan_builder = snapshot_box.scan().unwrap();
     if let Some(predicate) = predicate {
+        // TODO: There is a lot of redundancy between the various visit_expression_XXX methods here,
+        // vs. ProvidesMetadataFilter trait and the class hierarchy that supports it. Can we justify
+        // combining the two, so that native rust kernel code also uses the visitor idiom? Doing so
+        // might mean kernel no longer needs to define an expression class hierarchy of its own (at
+        // least, not for data skipping). Things may also look different after we remove arrow code
+        // from the kernel proper and make it one of the sensible default engine clients instead.
         let mut visitor_state = KernelExpressionVisitorState::new();
         let exprid = (predicate.visitor)(predicate.predicate, &mut visitor_state);
         if let Some(predicate) = unwrap_kernel_expression(&mut visitor_state, exprid) {

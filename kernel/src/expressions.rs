@@ -1,14 +1,7 @@
-use arrow_array::{
-    array::PrimitiveArray, types::{Int32Type, Int64Type}, Array, BooleanArray, Datum, RecordBatch, StructArray,
-};
-use arrow_ord::cmp::{gt, gt_eq, lt, lt_eq};
 use std::{
     collections::HashSet,
     fmt::{Display, Formatter},
-    sync::Arc,
 };
-
-use arrow_schema::ArrowError;
 
 use self::scalars::Scalar;
 
@@ -81,8 +74,6 @@ pub enum Expression {
     // TODO: support more expressions, such as IS IN, LIKE, etc.
 }
 
-pub type MetadataFilterResult = Result<BooleanArray, ArrowError>;
-pub type MetadataFilterResultFnOnce = Box<dyn FnOnce() -> MetadataFilterResult>;
 
 impl Display for Expression {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -195,169 +186,7 @@ impl Expression {
             Some(expr)
         })
     }
-
-    fn cast_column<'a, ArrayType: 'static>(name: &str, column: Option<&'a Arc<dyn Array>>)
-                                           -> Result<&'a ArrayType, ArrowError> {
-        column
-            .ok_or(ArrowError::SchemaError(format!("No such column: {}", name)))?
-            .as_any()
-            .downcast_ref::<ArrayType>()
-            .ok_or(ArrowError::SchemaError(format!("{} is not {}", name, std::any::type_name::<ArrayType>())))
-    }
-
-    /// Converts this predicate to a lazy data skipping predicate over the given record batch.
-    ///
-    /// The ultimate result is a The laziness is implemented using closures: For each node type, we
-    /// return a MetadataFilterResultFnOnce, which when invoked will evaluate the data skipping
-    /// expression to produce a BooleanArray. The evaluation is recursive, invoking the closures of
-    /// non-leaf children. Leaf children (column and literal) are extracted directly by the
-    /// operators that expect them. Because the evaluation could fail, it actually produces a
-    /// Result. Because a given expression may not be convertible to a data skipping predicate, this
-    /// method returns an Option.
-    // TODO: Given that this is anyway returning closures, rework the closures to take the stats
-    // record batch as an argument so we can extract filters only once and apply them to every batch
-    // in turn. We also need to decide which error conditions should surface as query errors,
-    // vs. merely invalidating the skipping predicate. However, this may first require figuring out
-    // why the closures are currently FnOnce instead of Fn (unless it's because of the reference to
-    // columns from the stats record batch, in which case the problem might sort itself out).
-    pub fn extract_metadata_filters(
-        &self,
-        stats: &RecordBatch,
-    ) -> Option<MetadataFilterResultFnOnce> {
-        let get_stats_col = |stat_name: &str, nested_names: &[&str], col_name: &str|
-                                                              -> Result<Arc<dyn Array>, ArrowError> {
-            let mut col = Self::cast_column::<StructArray>(&stat_name, stats.column_by_name(&stat_name));
-            for col_name in nested_names {
-                col = Self::cast_column::<StructArray>(&col_name, col?.column_by_name(&col_name));
-            }
-            col?.column_by_name(&col_name)
-                .ok_or(ArrowError::SchemaError(format!("No such column: {}", col_name)))
-                .map(|col| col.clone())
-        };
-
-        let extract_column = |stat_name: &str, expr: &Expression| -> Option<Result<Arc<dyn Array>, ArrowError>> {
-            match expr {
-                // TODO: split names like a.b.c into [a, b], c below
-                Expression::Column(name) => Some(get_stats_col(&stat_name, &[], name)),
-                _ => None,
-            }
-        };
-        let extract_literal = |expr: &Expression| -> Option<Box<dyn Datum>> {
-            match expr {
-                Expression::Literal(Scalar::Long(v)) =>
-                    Some(Box::new(PrimitiveArray::<Int64Type>::new_scalar(*v))),
-                Expression::Literal(Scalar::Integer(v)) =>
-                    Some(Box::new(PrimitiveArray::<Int32Type>::new_scalar(*v))),
-                _ => None
-            }
-        };
-        match self {
-            // <expr> AND <expr>
-            Expression::BinaryOperation { op: BinaryOperator::And, left, right } => {
-                let left = left.extract_metadata_filters(&stats);
-                let right = right.extract_metadata_filters(&stats);
-                // If one leg of the AND is missing, it just degenerates to the other leg.
-                match (left, right) {
-                    (Some(left), Some(right)) => {
-                        let f = move || -> MetadataFilterResult {
-                            arrow_arith::boolean::and(&left()?, &right()?)
-                        };
-                        Some(Box::new(f))
-                    }
-                    (left, right) => left.or(right),
-                }
-            }
-
-            // <expr> OR <expr>
-            Expression::BinaryOperation { op: BinaryOperator::Or, left, right } => {
-                let left = left.extract_metadata_filters(&stats);
-                let right = right.extract_metadata_filters(&stats);
-                // OR is valid only if both legs are valid.
-                left.zip(right).map(|(left, right)| -> MetadataFilterResultFnOnce {
-                    let f = || -> MetadataFilterResult {
-                        arrow_arith::boolean::or(&left()?, &right()?)
-                    };
-                    Box::new(f)
-                })
-            }
-
-            // col <compare> value
-            Expression::BinaryOperation { op, left, right } => {
-                let min_column = extract_column("minValues", left.as_ref());
-                let max_column = extract_column("maxValues", left.as_ref());
-                let literal = extract_literal(right.as_ref());
-                let (op, column): (fn(&dyn Datum, &dyn Datum) -> MetadataFilterResult, _) = match op {
-                    BinaryOperator::LessThan => (lt, min_column),
-                    BinaryOperator::LessThanOrEqual => (lt_eq, min_column),
-                    BinaryOperator::GreaterThan => (gt, max_column),
-                    BinaryOperator::GreaterThanOrEqual => (gt_eq, max_column),
-                    BinaryOperator::Equal => {
-                        // Equality filter compares the literal against both min and max stat columns
-                        println!("Got an equality filter");
-                        return min_column.zip(max_column).zip(literal)
-                            .map(|((min_col, max_col), literal)| -> MetadataFilterResultFnOnce {
-                                // TODO: Why does this move min_col and max_col out of their
-                                // environment, and why does that force the resulting function to be
-                                // FnOnce? And what does Box::new have to do with any of this?
-                                let f = move || -> MetadataFilterResult {
-                                    arrow_arith::boolean::and(
-                                        &lt_eq(&min_col?, literal.as_ref())?,
-                                        &lt_eq(literal.as_ref(), &max_col?)?)
-                                };
-                                Box::new(f)
-                            });
-                    }
-                    _ => return None, // Incompatible operator
-                };
-                column.zip(literal).map(|(col, lit)| ->MetadataFilterResultFnOnce {
-                    let f = move || -> MetadataFilterResult { op(&col?, lit.as_ref()) };
-                    Box::new(f)
-                })
-            }
-            _ => None,
-        }
-    }
 }
-
-// impl Expression {
-//     fn to_arrow(&self, stats: &StructArray) -> Result<BooleanArray, ArrowError> {
-//         match self {
-//             Expression::LessThan(left, right) => {
-//                 lt_scalar(left.to_arrow(stats), right.to_arrow(stats))
-//             }
-//             Expression::Column(c) => todo!(),
-//             Expression::Literal(l) => todo!(),
-//         }
-//     }
-// }
-
-// transform data predicate into metadata predicate
-// WHERE x < 10 -> min(x) < 10
-// fn construct_metadata_filters(e: Expression) -> Expression {
-//     match e {
-//         // col < value
-//         Expression::LessThan(left, right) => {
-//             match (*left, *right.clone()) {
-//                 (Expression::Column(name), Expression::Literal(_)) => {
-//                     // column_min < value
-//                     Expression::LessThan(Box::new(min_stat_col(name)), right)
-//                 }
-//                 _ => todo!(),
-//             }
-//         }
-//         _ => todo!(),
-//     }
-// }
-
-// fn min_stat_col(col_name: Vec<String>) -> Expression {
-//     stat_col("min", col_name)
-// }
-//
-// fn stat_col(stat: &str, name: Vec<String>) -> Expression {
-//     let mut v = vec![stat.to_owned()];
-//     v.extend(name);
-//     Expression::Column(v)
-// }
 
 impl std::ops::Add<Expression> for Expression {
     type Output = Self;
