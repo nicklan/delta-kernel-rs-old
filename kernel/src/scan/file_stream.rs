@@ -31,7 +31,6 @@ impl LogReplayScanner {
     /// don't match the predicate and Add actions that have corresponding Remove
     /// actions in the log.
     fn process_batch(&mut self, actions: &RecordBatch) -> DeltaResult<Vec<Add>> {
-        // TODO: This method only takes ownership because we can't capture
         let filtered_actions = match &self.filter {
             Some(filter) => Some(filter.apply(&actions)?),
             None => None,
