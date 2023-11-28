@@ -78,7 +78,11 @@ uintptr_t visit_expression_and(struct KernelExpressionVisitorState *state,
 
 uintptr_t visit_expression_lt(struct KernelExpressionVisitorState *state, uintptr_t a, uintptr_t b);
 
+uintptr_t visit_expression_le(struct KernelExpressionVisitorState *state, uintptr_t a, uintptr_t b);
+
 uintptr_t visit_expression_gt(struct KernelExpressionVisitorState *state, uintptr_t a, uintptr_t b);
+
+uintptr_t visit_expression_ge(struct KernelExpressionVisitorState *state, uintptr_t a, uintptr_t b);
 
 uintptr_t visit_expression_eq(struct KernelExpressionVisitorState *state, uintptr_t a, uintptr_t b);
 
