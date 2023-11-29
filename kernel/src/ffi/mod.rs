@@ -354,7 +354,7 @@ pub extern "C" fn get_scan_files(
 ) -> FileList {
     let snapshot = unsafe { Box::from_raw(snapshot) };
     let table_client = unsafe { Arc::from_raw(table_client) };
-    let mut scan_builder = snapshot.scan(table_client).unwrap();
+    let mut scan_builder = snapshot.scan(table_client.as_ref()).unwrap();
     if let Some(predicate) = predicate {
         // TODO: There is a lot of redundancy between the various visit_expression_XXX methods here,
         // vs. ProvidesMetadataFilter trait and the class hierarchy that supports it. Can we justify
@@ -369,7 +369,7 @@ pub extern "C" fn get_scan_files(
             scan_builder = scan_builder.with_predicate(*predicate);
         }
     }
-    let scan_adds = scan_builder.build().files().unwrap();
+    let scan_adds = scan_builder.build().files(table_client.as_ref()).unwrap();
     let mut file_count = 0;
     let mut files: Vec<*mut i8> = scan_adds.into_iter().map(|add| {
         file_count += 1;

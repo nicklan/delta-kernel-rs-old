@@ -270,14 +270,13 @@ impl Snapshot {
 
     pub fn scan<JRC: Send, PRC: Send + Sync>(
         self,
-        table_client: Arc<dyn TableClient<JsonReadContext = JRC, ParquetReadContext = PRC>>,
-    ) -> DeltaResult<ScanBuilder<JRC, PRC>> {
-        let schema = Arc::new(self.schema(table_client.as_ref())?);
+        table_client: &dyn TableClient<JsonReadContext = JRC, ParquetReadContext = PRC>,
+    ) -> DeltaResult<ScanBuilder> {
+        let schema = Arc::new(self.schema(table_client)?);
         Ok(ScanBuilder::new(
             self.table_root,
             schema,
             self.log_segment,
-            table_client,
         ))
     }
 }

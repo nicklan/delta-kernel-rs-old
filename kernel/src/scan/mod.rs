@@ -19,16 +19,15 @@ pub mod file_stream;
 
 // TODO projection: something like fn select(self, columns: &[&str])
 /// Builder to scan a snapshot of a table.
-pub struct ScanBuilder<JRC: Send, PRC: Send> {
+pub struct ScanBuilder {
     table_root: Url,
     log_segment: LogSegment,
     snapshot_schema: SchemaRef,
     schema: Option<SchemaRef>,
     predicate: Option<Expression>,
-    table_client: Arc<dyn TableClient<JsonReadContext = JRC, ParquetReadContext = PRC>>,
 }
 
-impl<JRC: Send, PRC: Send> std::fmt::Debug for ScanBuilder<JRC, PRC> {
+impl std::fmt::Debug for ScanBuilder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         f.debug_struct("ScanBuilder")
             .field("schema", &self.schema)
@@ -37,13 +36,12 @@ impl<JRC: Send, PRC: Send> std::fmt::Debug for ScanBuilder<JRC, PRC> {
     }
 }
 
-impl<JRC: Send, PRC: Send + Sync> ScanBuilder<JRC, PRC> {
+impl ScanBuilder {
     /// Create a new [`ScanBuilder`] instance.
     pub(crate) fn new(
         table_root: Url,
         snapshot_schema: SchemaRef,
         log_segment: LogSegment,
-        table_client: Arc<dyn TableClient<JsonReadContext = JRC, ParquetReadContext = PRC>>,
     ) -> Self {
         Self {
             table_root,
@@ -51,7 +49,6 @@ impl<JRC: Send, PRC: Send + Sync> ScanBuilder<JRC, PRC> {
             log_segment,
             schema: None,
             predicate: None,
-            table_client,
         }
     }
 
@@ -80,7 +77,7 @@ impl<JRC: Send, PRC: Send + Sync> ScanBuilder<JRC, PRC> {
     ///
     /// This is lazy and performs no 'work' at this point. The [`Scan`] type itself can be used
     /// to fetch the files and associated metadata required to perform actual data reads.
-    pub fn build(self) -> Scan<JRC, PRC> {
+    pub fn build(self) -> Scan {
         // if no schema is provided, use snapshot's entire schema (e.g. SELECT *)
         let schema = self.schema.unwrap_or_else(|| self.snapshot_schema.clone());
         Scan {
@@ -88,20 +85,18 @@ impl<JRC: Send, PRC: Send + Sync> ScanBuilder<JRC, PRC> {
             log_segment: self.log_segment,
             schema,
             predicate: self.predicate,
-            table_client: self.table_client,
         }
     }
 }
 
-pub struct Scan<JRC: Send, PRC: Send + Sync> {
+pub struct Scan {
     table_root: Url,
     log_segment: LogSegment,
     schema: SchemaRef,
     predicate: Option<Expression>,
-    table_client: Arc<dyn TableClient<JsonReadContext = JRC, ParquetReadContext = PRC>>,
 }
 
-impl<JRC: Send, PRC: Send + Sync> std::fmt::Debug for Scan<JRC, PRC> {
+impl std::fmt::Debug for Scan {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         f.debug_struct("Scan")
             .field("schema", &self.schema)
@@ -110,7 +105,7 @@ impl<JRC: Send, PRC: Send + Sync> std::fmt::Debug for Scan<JRC, PRC> {
     }
 }
 
-impl<JRC: Send, PRC: Send + Sync + 'static> Scan<JRC, PRC> {
+impl Scan {
     /// Get a shred reference to the [`Schema`] of the scan.
     ///
     /// [`Schema`]: crate::schema::Schema
@@ -127,7 +122,10 @@ impl<JRC: Send, PRC: Send + Sync + 'static> Scan<JRC, PRC> {
     /// which yields record batches of scan files and their associated metadata. Rows of the scan
     /// files batches correspond to data reads, and the DeltaReader is used to materialize the scan
     /// files into actual table data.
-    pub fn files(&self) -> DeltaResult<impl Iterator<Item = DeltaResult<Add>>> {
+    pub fn files<JRC: Send, PRC: Send + Sync>(
+        &self,
+        table_client: &dyn TableClient<JsonReadContext = JRC, ParquetReadContext = PRC>,
+    ) -> DeltaResult<impl Iterator<Item = DeltaResult<Add>>> {
         let action_schema = Arc::new(ArrowSchema {
             fields: Fields::from_iter([ActionType::Add.field(), ActionType::Remove.field()]),
             metadata: Default::default(),
@@ -135,15 +133,18 @@ impl<JRC: Send, PRC: Send + Sync + 'static> Scan<JRC, PRC> {
 
         let log_iter =
             self.log_segment
-                .replay(self.table_client.as_ref(), action_schema, self.predicate.clone())?;
+                .replay(table_client, action_schema, self.predicate.clone())?;
 
         Ok(log_replay_iter(log_iter, &self.schema, &self.predicate))
     }
 
-    pub fn execute(&self) -> DeltaResult<Vec<RecordBatch>> {
-        let parquet_handler = self.table_client.get_parquet_handler();
+    pub fn execute<JRC: Send, PRC: Send + Sync>(
+        &self,
+        table_client: &dyn TableClient<JsonReadContext = JRC, ParquetReadContext = PRC>,
+    ) -> DeltaResult<Vec<RecordBatch>> {
+        let parquet_handler = table_client.get_parquet_handler();
 
-        self.files()?
+        self.files(table_client)?
             .map(|res| {
                 let add = res?;
                 let meta = FileMeta {
@@ -164,7 +165,7 @@ impl<JRC: Send, PRC: Send + Sync + 'static> Scan<JRC, PRC> {
                 let batch = concat_batches(&schema, &batches)?;
 
                 if let Some(dv_descriptor) = add.deletion_vector {
-                    let fs_client = self.table_client.get_file_system_client();
+                    let fs_client = table_client.get_file_system_client();
                     let dv = dv_descriptor.read(fs_client, self.table_root.clone())?;
                     let mask: BooleanArray = (0..batch.num_rows())
                         .map(|i| Some(!dv.contains(i.try_into().expect("fit into u32"))))
