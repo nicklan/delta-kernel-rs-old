@@ -4,23 +4,20 @@
 #include <ostream>
 #include <new>
 
-struct JsonReadContext;
+template<typename E = void>
+struct DefaultTableClient;
 
 struct KernelExpressionVisitorState;
-
-struct ParquetReadContext;
 
 /// In-memory representation of a specific snapshot of a Delta table. While a `DeltaTable` exists
 /// throughout time, `Snapshot`s represent a view of a table at a specific point in time; they
 /// have a defined schema (which may change over time for any given table), specific version, and
 /// frozen log segment.
-template<typename JRC = void, typename PRC = void>
 struct Snapshot;
 
-/// In-memory representation of a Delta table, which acts as an immutable root entity for reading
-/// the different versions (see [`Snapshot`]) of the table located in storage.
-template<typename JRC = void, typename PRC = void>
-struct Table;
+/// A [`TaskExecutor`] that uses the tokio single-threaded runtime in a
+/// background thread to service tasks.
+struct TokioBackgroundExecutor;
 
 /// Model iterators. This allows an engine to specify iteration however it likes, and we simply wrap
 /// the engine functions. The engine retains ownership of the iterator.
@@ -29,9 +26,9 @@ struct EngineIterator {
   const void *(*get_next)(void *data);
 };
 
-using DefaultTable = Table<JsonReadContext, ParquetReadContext>;
+using KernelDefaultTableClient = DefaultTableClient<TokioBackgroundExecutor>;
 
-using DefaultSnapshot = Snapshot<JsonReadContext, ParquetReadContext>;
+using DefaultSnapshot = Snapshot;
 
 struct EngineSchemaVisitor {
   void *data;
@@ -60,15 +57,17 @@ extern "C" {
 /// test function to print for items. this assumes each item is an `int`
 void iterate(EngineIterator *it);
 
-DefaultTable *get_table_with_default_client(const char *path);
+const KernelDefaultTableClient *get_default_client(const char *path);
 
 /// Get the latest snapshot from the specified table
-DefaultSnapshot *snapshot(DefaultTable *table);
+DefaultSnapshot *snapshot(const char *path, const KernelDefaultTableClient *table_client);
 
 /// Get the version of the specified snapshot
 uint64_t version(DefaultSnapshot *snapshot);
 
-uintptr_t visit_schema(DefaultSnapshot *snapshot, EngineSchemaVisitor *visitor);
+uintptr_t visit_schema(DefaultSnapshot *snapshot,
+                       const KernelDefaultTableClient *table_client,
+                       EngineSchemaVisitor *visitor);
 
 uintptr_t visit_expression_and(KernelExpressionVisitorState *state, EngineIterator *children);
 
@@ -90,6 +89,8 @@ uintptr_t visit_expression_literal_long(KernelExpressionVisitorState *state, int
 
 /// Get a FileList for all the files that need to be read from the table. NB: This _consumes_ the
 /// snapshot, it is no longer valid after making this call (TODO: We should probably fix this?)
-FileList get_scan_files(DefaultSnapshot *snapshot, EnginePredicate *predicate);
+FileList get_scan_files(DefaultSnapshot *snapshot,
+                        const KernelDefaultTableClient *table_client,
+                        EnginePredicate *predicate);
 
 } // extern "C"

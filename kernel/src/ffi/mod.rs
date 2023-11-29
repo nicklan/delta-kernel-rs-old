@@ -1,6 +1,7 @@
 /// Contains code the exposes what an engine needs to call from 'c' to interface with kernel
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_void};
+use url::Url;
 
 use crate::expressions::{BinaryOperator, Expression, scalars::Scalar};
 
@@ -86,54 +87,54 @@ pub struct EngineClientOps {
 
 // stuff for the default client
 use crate::client::executor::tokio::TokioBackgroundExecutor;
-use crate::client::{DefaultTableClient, json::JsonReadContext, parquet::ParquetReadContext};
 use crate::snapshot::Snapshot;
 use crate::schema::{DataType, PrimitiveType, StructField, StructType};
-use crate::Table;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-type DefaultTable = Table<JsonReadContext, ParquetReadContext>;
-type DefaultSnapshot = Snapshot<JsonReadContext, ParquetReadContext>;
+type DefaultSnapshot = Snapshot;
+type KernelDefaultTableClient = crate::DefaultTableClient<TokioBackgroundExecutor>;
 
-
-#[no_mangle]
-pub extern "C" fn get_table_with_default_client(path: *const c_char) -> *mut DefaultTable {
-    let c_str = unsafe { CStr::from_ptr(path) };
-    let path = c_str.to_str().unwrap();
+fn unwrap_and_parse_path_as_url(path: *const c_char) -> Option<Url> {
+    let path = unsafe { CStr::from_ptr(path) };
+    let path = path.to_str().unwrap();
     let path = std::fs::canonicalize(PathBuf::from(path));
     let Ok(path) = path else {
         println!("Couldn't open table: {}", path.err().unwrap());
-        return std::ptr::null_mut();
+        return None
     };
-    let Ok(url) = url::Url::from_directory_path(path) else {
+    let Ok(url) = Url::from_directory_path(path) else {
         println!("Invalid url");
+        return None
+    };
+    Some(url)
+}
+
+#[no_mangle]
+pub extern "C" fn get_default_client(path: *const c_char) -> *const KernelDefaultTableClient {
+    let Some(url) = unwrap_and_parse_path_as_url(path) else {
         return std::ptr::null_mut();
     };
-    let table_client = DefaultTableClient::try_new(
+    let table_client = KernelDefaultTableClient::try_new(
         &url,
         HashMap::<String, String>::new(),
         Arc::new(TokioBackgroundExecutor::new()),
     );
     let Ok(table_client) = table_client else {
-        println!(
-            "Failed to construct table client: {}",
-            table_client.err().unwrap()
-        );
+        println!("Error creating table client: {}", table_client.err().unwrap());
         return std::ptr::null_mut();
     };
-    let table_client = Arc::new(table_client);
-
-    let table = Table::new(url, table_client.clone());
-    Box::into_raw(Box::new(table))
+    Arc::into_raw(Arc::new(table_client))
 }
-
 
 /// Get the latest snapshot from the specified table
 #[no_mangle]
-pub extern "C" fn snapshot(table: &mut DefaultTable) -> *mut DefaultSnapshot {
-    let snapshot = table.snapshot(None).unwrap();
+pub extern "C" fn snapshot(path: *const c_char, table_client: &KernelDefaultTableClient) -> *mut DefaultSnapshot {
+    let Some(url) = unwrap_and_parse_path_as_url(path) else {
+        return std::ptr::null_mut();
+    };
+    let snapshot = Snapshot::try_new(url, table_client, None).unwrap();
     Box::into_raw(Box::new(snapshot))
 }
 
@@ -144,7 +145,11 @@ pub extern "C" fn version(snapshot: &mut DefaultSnapshot) -> u64 {
 }
 
 #[no_mangle]
-pub extern "C" fn visit_schema(snapshot: &mut DefaultSnapshot, visitor: &mut EngineSchemaVisitor) -> usize {
+pub extern "C" fn visit_schema(
+    snapshot: &mut DefaultSnapshot,
+    table_client: &KernelDefaultTableClient,
+    visitor: &mut EngineSchemaVisitor,
+) -> usize {
     // Visit all the fields of a struct and return the list of children
     fn visit_struct_fields(visitor: &EngineSchemaVisitor, s: &StructType) -> usize {
         let child_list_id = (visitor.make_field_list)(visitor.data, s.fields.len());
@@ -172,7 +177,7 @@ pub extern "C" fn visit_schema(snapshot: &mut DefaultSnapshot, visitor: &mut Eng
         }
     }
 
-    let schema: StructType = snapshot.schema().unwrap();
+    let schema: StructType = snapshot.schema(table_client).unwrap();
     visit_struct_fields(visitor, &schema)
 }
 
@@ -342,9 +347,14 @@ pub struct FileList {
 /// Get a FileList for all the files that need to be read from the table. NB: This _consumes_ the
 /// snapshot, it is no longer valid after making this call (TODO: We should probably fix this?)
 #[no_mangle]
-pub extern "C" fn get_scan_files(snapshot: *mut DefaultSnapshot, predicate: Option<&mut EnginePredicate>) -> FileList {
-    let snapshot_box: Box<DefaultSnapshot> = unsafe { Box::from_raw(snapshot) };
-    let mut scan_builder = snapshot_box.scan().unwrap();
+pub extern "C" fn get_scan_files(
+    snapshot: *mut DefaultSnapshot,
+    table_client: *const KernelDefaultTableClient,
+    predicate: Option<&mut EnginePredicate>,
+) -> FileList {
+    let snapshot = unsafe { Box::from_raw(snapshot) };
+    let table_client = unsafe { Arc::from_raw(table_client) };
+    let mut scan_builder = snapshot.scan(table_client).unwrap();
     if let Some(predicate) = predicate {
         // TODO: There is a lot of redundancy between the various visit_expression_XXX methods here,
         // vs. ProvidesMetadataFilter trait and the class hierarchy that supports it. Can we justify

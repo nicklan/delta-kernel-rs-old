@@ -3,6 +3,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+typedef struct DefaultTableClient_TokioBackgroundExecutor DefaultTableClient_TokioBackgroundExecutor;
+
 typedef struct KernelExpressionVisitorState KernelExpressionVisitorState;
 
 /**
@@ -11,13 +13,7 @@ typedef struct KernelExpressionVisitorState KernelExpressionVisitorState;
  * have a defined schema (which may change over time for any given table), specific version, and
  * frozen log segment.
  */
-typedef struct Snapshot_JsonReadContext__ParquetReadContext Snapshot_JsonReadContext__ParquetReadContext;
-
-/**
- * In-memory representation of a Delta table, which acts as an immutable root entity for reading
- * the different versions (see [`Snapshot`]) of the table located in storage.
- */
-typedef struct Table_JsonReadContext__ParquetReadContext Table_JsonReadContext__ParquetReadContext;
+typedef struct Snapshot Snapshot;
 
 /**
  * Model iterators. This allows an engine to specify iteration however it likes, and we simply wrap
@@ -28,9 +24,9 @@ typedef struct EngineIterator {
   const void *(*get_next)(void *data);
 } EngineIterator;
 
-typedef struct Table_JsonReadContext__ParquetReadContext DefaultTable;
+typedef struct DefaultTableClient_TokioBackgroundExecutor KernelDefaultTableClient;
 
-typedef struct Snapshot_JsonReadContext__ParquetReadContext DefaultSnapshot;
+typedef struct Snapshot DefaultSnapshot;
 
 typedef struct EngineSchemaVisitor {
   void *data;
@@ -59,19 +55,21 @@ typedef struct EnginePredicate {
  */
 void iterate(struct EngineIterator *it);
 
-DefaultTable *get_table_with_default_client(const char *path);
+const KernelDefaultTableClient *get_default_client(const char *path);
 
 /**
  * Get the latest snapshot from the specified table
  */
-DefaultSnapshot *snapshot(DefaultTable *table);
+DefaultSnapshot *snapshot(const char *path, const KernelDefaultTableClient *table_client);
 
 /**
  * Get the version of the specified snapshot
  */
 uint64_t version(DefaultSnapshot *snapshot);
 
-uintptr_t visit_schema(DefaultSnapshot *snapshot, struct EngineSchemaVisitor *visitor);
+uintptr_t visit_schema(DefaultSnapshot *snapshot,
+                       const KernelDefaultTableClient *table_client,
+                       struct EngineSchemaVisitor *visitor);
 
 uintptr_t visit_expression_and(struct KernelExpressionVisitorState *state,
                                struct EngineIterator *children);
@@ -97,4 +95,6 @@ uintptr_t visit_expression_literal_long(struct KernelExpressionVisitorState *sta
  * Get a FileList for all the files that need to be read from the table. NB: This _consumes_ the
  * snapshot, it is no longer valid after making this call (TODO: We should probably fix this?)
  */
-struct FileList get_scan_files(DefaultSnapshot *snapshot, struct EnginePredicate *predicate);
+struct FileList get_scan_files(DefaultSnapshot *snapshot,
+                               const KernelDefaultTableClient *table_client,
+                               struct EnginePredicate *predicate);

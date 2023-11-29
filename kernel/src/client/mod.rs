@@ -35,6 +35,12 @@ pub struct DefaultTableClient<E: TaskExecutor> {
     parquet: Arc<DefaultParquetHandler<E>>,
 }
 
+impl<E: TaskExecutor> Drop for DefaultTableClient<E> {
+    fn drop(&mut self) {
+        println!("Dropping {:p}", self)
+    }
+}
+
 impl<E: TaskExecutor> DefaultTableClient<E> {
     /// Create a new [`DefaultTableClient`] instance
     ///

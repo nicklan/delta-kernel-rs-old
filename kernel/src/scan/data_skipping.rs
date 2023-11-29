@@ -177,6 +177,7 @@ impl ProvidesMetadataFilter for Expression {
         match self {
             // <expr> AND <expr>
             Expression::BinaryOperation { op: BinaryOperator::And, left, right } => {
+                println!("AND got left {} and right {}", left, right);
                 let left = left.extract_metadata_filters();
                 let right = right.extract_metadata_filters();
                 // If one leg of the AND is missing, it just degenerates to the other leg.

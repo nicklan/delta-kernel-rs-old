@@ -51,6 +51,7 @@ impl LogReplayScanner {
                         .seen
                         .contains(&(add.path.clone(), add.dv_unique_id())) =>
                 {
+                    println!("Found file: {}", &add.path);
                     self.seen.insert((add.path.clone(), add.dv_unique_id()));
                     Some(add)
                 }
