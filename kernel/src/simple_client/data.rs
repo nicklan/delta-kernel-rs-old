@@ -170,6 +170,7 @@ impl SimpleData {
         Ok(SimpleData::new(data?))
     }
 
+    // TODO needs to apply the schema to the parquet read
     pub fn try_create_from_parquet(_schema: SchemaRef, location: Url) -> DeltaResult<Self> {
         let file = File::open(
             location
